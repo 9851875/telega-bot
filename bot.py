@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""YouTube -> Telegram: отправка ссылки на последнее видео 'Новости Сегодня'"""
+"""YouTube -> Telegram: отправка ссылки на последнее видео 'Сегодня Новости'"""
 
 import os
 import sys
@@ -45,7 +45,7 @@ def find_daily_news_video():
         video_url = entry.find("atom:link", ns).attrib["href"]
         video_id = entry.find("atom:id", ns).text.split(":")[-1]
         
-        if "Новости Сегодня" in title:
+        if "Сегодня Новости" in title:
             print(f"   ✅ Найдено: {title}")
             return {"title": title, "id": video_id, "url": video_url}
     
