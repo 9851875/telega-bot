@@ -2,7 +2,7 @@ name: Ежедневная отправка видео
 
 on:
   schedule:
-    - cron: '30 7 * * *'
+    - cron: '30 14 * * *'
   workflow_dispatch:
 
 permissions:
