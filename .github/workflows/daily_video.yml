@@ -19,6 +19,11 @@ jobs:
       - name: Клонировать репозиторий
         uses: actions/checkout@v4
 
+      - name: Создать файл кукисов
+        env:
+          YT_COOKIES_B64: ${{ secrets.YOUTUBE_COOKIES_B64 }}
+        run: echo "$YT_COOKIES_B64" | base64 -d > youtube_cookies.txt
+
       - name: Установить Python
         uses: actions/setup-python@v5
         with:
