@@ -1,0 +1,41 @@
+name: Ежедневная отправка видео
+
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  send-video:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Клонировать репозиторий
+        uses: actions/checkout@v4
+
+      - name: Установить Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Установить yt-dlp
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install yt-dlp requests
+
+      - name: Проверить и отправить видео
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python3 bot.py
+
+      - name: Сохранить last_video_id.txt
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add last_video_id.txt
+          git diff --staged --quiet || (git commit -m "Обновление last_video_id [skip ci]" && git push)
