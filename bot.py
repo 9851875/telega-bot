@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
-YOUTUBE_CHANNEL_ID = "UCzPzqPxcds8rNVaY7J9fJ2g"  # ID канала Информатор
+YOUTUBE_CHANNEL_ID = "UC_zpuqpjmFZfKq4E-rMGBvw"  # ID канала Информатор
 LAST_VIDEO_FILE = "last_video_id.txt"
 
 def get_channel_id():
