@@ -1,62 +1,59 @@
 #!/usr/bin/env python3
-"""YouTube -> Telegram: пересылка последнего видео "Новости Сегодня" из канала @Informator-today"""
+"""YouTube -> Telegram: через invidious/yewtu.be зеркала без кукисов"""
 
 import os
 import sys
 import subprocess
 import requests
 import glob
+import json
+import random
 from datetime import datetime, timezone
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
-YOUTUBE_CHANNEL_URL = "https://www.youtube.com/@Informator-today"
+YOUTUBE_CHANNEL_ID = "@Informator-today"
 LAST_VIDEO_FILE = "last_video_id.txt"
-COOKIES_FILE = "youtube_cookies.txt"
+
+INVIDIOUS_INSTANCES = [
+    "https://invidious.fdn.fr",
+    "https://inv.nadeko.net",
+    "https://invidious.privacyredirect.com",
+    "https://vid.puffyan.us",
+    "https://invidious.lunar.icu",
+    "https://inv.tux.pizza",
+]
 
 def find_daily_news_video():
-    """Найти последнее видео с 'Новости Сегодня'"""
-    search_query = f"ytsearch1:\"Новости Сегодня\" @Informator-today"
-    cmd = [
-        "yt-dlp",
-        "--flat-playlist",
-        "--print", "%(title)s|||%(id)s|||%(webpage_url)s",
-        "--cookies", COOKIES_FILE,
-        "--no-warnings",
-        search_query
-    ]
-    print(f"🔍 Поиск: {search_query}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    print(f"📤 STDOUT: {result.stdout[:500]}")
-    if result.stderr:
-        print(f"⚠️ STDERR: {result.stderr[:500]}")
-    if result.returncode != 0:
-        print(f"❌ yt-dlp ошибка (код {result.returncode})")
+    """Найти последнее видео через Invidious API"""
+    instance = random.choice(INVIDIOUS_INSTANCES)
+    url = f"{instance}/api/v1/channels/{YOUTUBE_CHANNEL_ID}/videos"
+    print(f"🔍 Invidious: {instance}")
+    try:
+        resp = requests.get(url, timeout=30)
+        if resp.status_code != 200:
+            print(f"❌ HTTP {resp.status_code}")
+            return None
+        videos = resp.json()
+    except Exception as e:
+        print(f"❌ Ошибка запроса: {e}")
         return None
-    for line in result.stdout.strip().split('\n'):
-        if not line: continue
-        parts = line.split('|||')
-        if len(parts) != 3: continue
-        title, video_id, url = parts
-        print(f"✅ Найдено: {title}")
-        return {"title": title, "id": video_id, "url": url}
-    print("🔍 Плейлист канала...")
-    cmd2 = [
-        "yt-dlp", "--flat-playlist",
-        "--print", "%(title)s|||%(id)s|||%(webpage_url)s",
-        "--playlist-end", "10", "--cookies", COOKIES_FILE,
-        "--no-warnings", f"{YOUTUBE_CHANNEL_URL}/videos"
-    ]
-    result2 = subprocess.run(cmd2, capture_output=True, text=True)
-    for line in result2.stdout.strip().split('\n'):
-        if not line: continue
-        parts = line.split('|||')
-        if len(parts) != 3: continue
-        title, video_id, url = parts
-        if "Новости Сегодня" in title:
+    
+    if not videos or 'videos' not in videos:
+        print("❌ Пустой ответ")
+        return None
+    
+    for v in videos['videos']:
+        title = v.get('title', '')
+        if 'Новости Сегодня' in title:
+            video_id = v['videoId']
             print(f"✅ Найдено: {title}")
-            return {"title": title, "id": video_id, "url": url}
-    print("❌ Видео не найдено")
+            return {
+                "title": title,
+                "id": video_id,
+                "url": f"https://www.youtube.com/watch?v={video_id}"
+            }
+    print("❌ Видео не найдено в выдаче")
     return None
 
 def load_last_video_id():
@@ -71,18 +68,34 @@ def save_last_video_id(video_id):
         f.write(video_id)
 
 def download_video(video_url):
+    """Скачать через yt-dlp с несколькими попытками"""
     output_template = "video.%(ext)s"
-    cmd = [
-        "yt-dlp", "-f", "best[height<=1080]", "-o", output_template,
-        "--cookies", COOKIES_FILE, "--no-warnings",
-        "--max-filesize", "2000M", video_url
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        print(f"❌ Ошибка скачивания: {result.stderr[:500]}")
-        return None
-    files = glob.glob("video.*")
-    return files[0] if files else None
+    # Пробуем разные user-agent и форматы
+    for attempt in range(3):
+        ua = random.choice([
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        ])
+        cmd = [
+            "yt-dlp",
+            "-f", "best[height<=1080]",
+            "-o", output_template,
+            "--user-agent", ua,
+            "--no-warnings",
+            "--max-filesize", "2000M",
+            "--extractor-retries", "5",
+            "--retries", "5",
+            video_url
+        ]
+        print(f"📥 Попытка {attempt+1}/3...")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            files = glob.glob("video.*")
+            if files:
+                return files[0]
+        else:
+            print(f"⚠️ Ошибка: {result.stderr[:300]}")
+    return None
 
 def send_to_telegram(video_path, caption):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendVideo"
@@ -115,7 +128,7 @@ def main():
     if not video_path:
         print("❌ Не удалось скачать видео")
         sys.exit(1)
-    caption = f"{video['title']}\n\nИсточник: {YOUTUBE_CHANNEL_URL}"
+    caption = f"{video['title']}\n\nИсточник: {YOUTUBE_CHANNEL_ID}"
     if send_to_telegram(video_path, caption):
         save_last_video_id(video['id'])
         print(f"💾 Сохранён ID видео: {video['id']}")
