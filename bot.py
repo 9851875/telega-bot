@@ -3,7 +3,6 @@
 
 import os
 import sys
-import json
 import subprocess
 import requests
 import glob
@@ -11,27 +10,63 @@ from datetime import datetime, timezone
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
-YOUTUBE_CHANNEL = "https://www.youtube.com/@Informator-today"
+YOUTUBE_CHANNEL_URL = "https://www.youtube.com/@Informator-today"
 LAST_VIDEO_FILE = "last_video_id.txt"
 
-def find_daily_news_video(channel_url):
+def find_daily_news_video():
+    """Найти последнее видео с 'Новости Сегодня' по названию через поиск"""
+    # Используем поисковый запрос yt-dlp к каналу
+    search_query = f"ytsearch1:\"Новости Сегодня\" @Informator-today"
     cmd = [
-        "yt-dlp", "--flat-playlist", "--print", "%(title)s|||%(id)s|||%(url)s",
-        "--playlist-end", "15", "--no-warnings", f"{channel_url}/videos"
+        "yt-dlp",
+        "--flat-playlist",
+        "--print", "%(title)s|||%(id)s|||%(webpage_url)s",
+        "--no-warnings",
+        search_query
     ]
+    print(f"🔍 Поиск: {search_query}")
     result = subprocess.run(cmd, capture_output=True, text=True)
+    print(f"📤 STDOUT: {result.stdout[:500]}")
+    if result.stderr:
+        print(f"⚠️ STDERR: {result.stderr[:500]}")
+    
     if result.returncode != 0:
-        print(f"❌ yt-dlp ошибка: {result.stderr}")
+        print(f"❌ yt-dlp ошибка (код {result.returncode})")
         return None
+    
     for line in result.stdout.strip().split('\n'):
         if not line: continue
         parts = line.split('|||')
         if len(parts) != 3: continue
         title, video_id, url = parts
+        print(f"✅ Найдено: {title}")
+        return {"title": title, "id": video_id, "url": url}
+    
+    # Если поиск не дал — пробуем плейлист канала
+    print("🔍 Поиск не дал результатов, пробуем плейлист канала...")
+    cmd2 = [
+        "yt-dlp",
+        "--flat-playlist",
+        "--print", "%(title)s|||%(id)s|||%(webpage_url)s",
+        "--playlist-end", "10",
+        "--no-warnings",
+        f"{YOUTUBE_CHANNEL_URL}/videos"
+    ]
+    result2 = subprocess.run(cmd2, capture_output=True, text=True)
+    print(f"📤 STDOUT: {result2.stdout[:500]}")
+    if result2.stderr:
+        print(f"⚠️ STDERR: {result2.stderr[:500]}")
+    
+    for line in result2.stdout.strip().split('\n'):
+        if not line: continue
+        parts = line.split('|||')
+        if len(parts) != 3: continue
+        title, video_id, url = parts
         if "Новости Сегодня" in title:
-            print(f"✅ Найдено: {title}")
+            print(f"✅ Найдено в плейлисте: {title}")
             return {"title": title, "id": video_id, "url": url}
-    print("❌ Видео 'Новости Сегодня' не найдено")
+    
+    print("❌ Видео 'Новости Сегодня' не найдено ни поиском ни в плейлисте")
     return None
 
 def load_last_video_id():
@@ -50,7 +85,7 @@ def download_video(video_url):
     cmd = ["yt-dlp", "-f", "best[height<=1080]", "-o", output_template, "--no-warnings", "--max-filesize", "2000M", video_url]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"❌ Ошибка скачивания: {result.stderr}")
+        print(f"❌ Ошибка скачивания: {result.stderr[:500]}")
         return None
     files = glob.glob("video.*")
     return files[0] if files else None
@@ -73,23 +108,28 @@ def main():
     print("=" * 50)
     print(f"🕐 Запуск: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print("=" * 50)
-    video = find_daily_news_video(YOUTUBE_CHANNEL)
+    
+    video = find_daily_news_video()
     if not video:
         print("❌ Нет подходящего видео. Выход.")
         return
+    
     last_id = load_last_video_id()
     if video['id'] == last_id:
         print(f"⚠️ Видео {video['id']} уже было отправлено. Выход.")
         return
+    
     print(f"📥 Скачиваю: {video['title']}")
     video_path = download_video(video['url'])
     if not video_path:
         print("❌ Не удалось скачать видео")
         sys.exit(1)
-    caption = f"{video['title']}\n\nИсточник: {YOUTUBE_CHANNEL}"
+    
+    caption = f"{video['title']}\n\nИсточник: {YOUTUBE_CHANNEL_URL}"
     if send_to_telegram(video_path, caption):
         save_last_video_id(video['id'])
         print(f"💾 Сохранён ID видео: {video['id']}")
+    
     os.remove(video_path)
     print("🧹 Временный файл удалён")
     print("=" * 50)

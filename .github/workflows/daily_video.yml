@@ -12,6 +12,8 @@ jobs:
   send-video:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Клонировать репозиторий
@@ -35,7 +37,11 @@ jobs:
 
       - name: Сохранить last_video_id.txt
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add last_video_id.txt
-          git diff --staged --quiet || (git commit -m "Обновление last_video_id [skip ci]" && git push)
+          if [ -f last_video_id.txt ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add last_video_id.txt
+            git diff --staged --quiet || (git commit -m "Обновление last_video_id [skip ci]" && git push)
+          else
+            echo "⚠️ last_video_id.txt не создан — нечего сохранять"
+          fi
