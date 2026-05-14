@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""YouTube -> Telegram: отправка ссылки на последнее видео 'Сегодня Новости'"""
+"""YouTube -> Telegram: отправка ссылки на последнее видео 'Сегодня Новости' или 'Новости Дня'"""
 
 import os
 import sys
@@ -9,20 +9,11 @@ from datetime import datetime, timezone
 
 BOT_TOKEN = os.environ["BOT_TOKEN"]
 CHAT_ID = os.environ["CHAT_ID"]
-YOUTUBE_CHANNEL_ID = "UC_zpuqpjmFZfKq4E-rMGBvw"  # ID канала Информатор
+YOUTUBE_CHANNEL_ID = "UC_zpuqpjmFZfKq4E-rMGBvw"
 LAST_VIDEO_FILE = "last_video_id.txt"
 
-def get_channel_id():
-    """Получить ID канала по @handle через oEmbed (без API ключа)"""
-    url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/@Informator-today&format=json"
-    print(f"🔍 Получаем ID канала...")
-    try:
-        resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
-        print(f"   HTTP {resp.status_code}")
-    except Exception as e:
-        print(f"   ❌ {e}")
-        return None
-    return YOUTUBE_CHANNEL_ID  # ID уже известен
+# Ищем видео по этим ключевым словам (приоритет по порядку)
+SEARCH_PATTERNS = ["Сегодня Новости", "Новости Дня"]
 
 def find_daily_news_video():
     """Найти последнее видео через YouTube RSS ленту"""
@@ -40,16 +31,29 @@ def find_daily_news_video():
     root = ET.fromstring(resp.content)
     ns = {"atom": "http://www.w3.org/2005/Atom"}
     
+    # Собираем все видео, потом фильтруем
+    found_videos = []
     for entry in root.findall("atom:entry", ns):
         title = entry.find("atom:title", ns).text
         video_url = entry.find("atom:link", ns).attrib["href"]
         video_id = entry.find("atom:id", ns).text.split(":")[-1]
+        published = entry.find("atom:published", ns).text
         
-        if "Сегодня Новости" in title:
-            print(f"   ✅ Найдено: {title}")
-            return {"title": title, "id": video_id, "url": video_url}
+        found_videos.append({"title": title, "id": video_id, "url": video_url, "date": published})
     
-    print("   ❌ Видео не найдено")
+    print(f"   Всего видео в ленте: {len(found_videos)}")
+    
+    # Ищем по паттернам
+    for pattern in SEARCH_PATTERNS:
+        for v in found_videos:
+            if pattern in v['title']:
+                print(f"   ✅ Найдено по '{pattern}': {v['title']}")
+                return {"title": v['title'], "id": v['id'], "url": v['url']}
+    
+    # Покажем что есть для диагностики
+    print("   ❌ Видео не найдено. Последние заголовки:")
+    for v in found_videos[:5]:
+        print(f"      - {v['title']}")
     return None
 
 def load_last_video_id():
