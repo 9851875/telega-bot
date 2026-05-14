@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""YouTube -> Telegram: отправка ссылки на последнее видео 'Сегодня Новости' или 'Новости Дня'"""
+"""YouTube -> Telegram: отправка ссылки на самое свежее новостное видео"""
 
 import os
 import sys
@@ -12,11 +12,11 @@ CHAT_ID = os.environ["CHAT_ID"]
 YOUTUBE_CHANNEL_ID = "UC_zpuqpjmFZfKq4E-rMGBvw"
 LAST_VIDEO_FILE = "last_video_id.txt"
 
-# Ищем видео по этим ключевым словам (приоритет по порядку)
+# Ключевые слова для поиска новостных видео
 SEARCH_PATTERNS = ["Сегодня Новости", "Новости Дня"]
 
 def find_daily_news_video():
-    """Найти последнее видео через YouTube RSS ленту"""
+    """Найти САМОЕ СВЕЖЕЕ видео по ключевым словам"""
     rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={YOUTUBE_CHANNEL_ID}"
     print(f"🔍 RSS: {rss_url}")
     try:
@@ -31,30 +31,33 @@ def find_daily_news_video():
     root = ET.fromstring(resp.content)
     ns = {"atom": "http://www.w3.org/2005/Atom"}
     
-    # Собираем все видео, потом фильтруем
-    found_videos = []
+    # Собираем ВСЕ видео, которые подходят под паттерны
+    matched = []
     for entry in root.findall("atom:entry", ns):
         title = entry.find("atom:title", ns).text
         video_url = entry.find("atom:link", ns).attrib["href"]
         video_id = entry.find("atom:id", ns).text.split(":")[-1]
         published = entry.find("atom:published", ns).text
         
-        found_videos.append({"title": title, "id": video_id, "url": video_url, "date": published})
+        for pattern in SEARCH_PATTERNS:
+            if pattern in title:
+                matched.append({
+                    "title": title, "id": video_id, "url": video_url, "date": published
+                })
+                break
     
-    print(f"   Всего видео в ленте: {len(found_videos)}")
+    print(f"   Найдено совпадений: {len(matched)}")
     
-    # Ищем по паттернам
-    for pattern in SEARCH_PATTERNS:
-        for v in found_videos:
-            if pattern in v['title']:
-                print(f"   ✅ Найдено по '{pattern}': {v['title']}")
-                return {"title": v['title'], "id": v['id'], "url": v['url']}
+    if not matched:
+        print("   ❌ Ни одно видео не подошло. Последние заголовки:")
+        for entry in root.findall("atom:entry", ns)[:5]:
+            print(f"      - {entry.find('atom:title', ns).text}")
+        return None
     
-    # Покажем что есть для диагностики
-    print("   ❌ Видео не найдено. Последние заголовки:")
-    for v in found_videos[:5]:
-        print(f"      - {v['title']}")
-    return None
+    # Берём самое свежее (первое в RSS = самое новое)
+    best = matched[0]
+    print(f"   ✅ Самое свежее: {best['title']} (дата: {best['date']})")
+    return {"title": best['title'], "id": best['id'], "url": best['url']}
 
 def load_last_video_id():
     try:
@@ -68,7 +71,6 @@ def save_last_video_id(video_id):
         f.write(video_id)
 
 def send_link_to_telegram(title, video_url):
-    """Отправить ссылку на видео в Telegram"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     text = f"📰 {title}\n\n{video_url}"
     data = {
