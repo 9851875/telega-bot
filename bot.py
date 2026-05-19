@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""YouTube -> Telegram: отправка ссылки на самое свежее новостное видео"""
+"""YouTube -> Telegram: отправка ссылки на самое свежее новостное видео (без трансляций)"""
 
 import os
 import sys
@@ -12,11 +12,37 @@ CHAT_ID = os.environ["CHAT_ID"]
 YOUTUBE_CHANNEL_ID = "UC_zpuqpjmFZfKq4E-rMGBvw"
 LAST_VIDEO_FILE = "last_video_id.txt"
 
-# Ключевые слова для поиска новостных видео
 SEARCH_PATTERNS = ["Сегодня Новости", "Новости Дня"]
 
+def is_livestream_or_premiere(entry, ns):
+    """Проверить, является ли видео трансляцией или премьерой"""
+    # YouTube RSS помечает трансляции и премьеры через <yt:videoId> и др.
+    # Проверяем наличие тега <yt:live> или длительность = 0 (трансляция)
+    
+    # 1. Проверка yt:live (прямой эфир)
+    live = entry.find("yt:live", ns)
+    if live is not None:
+        return True
+    
+    # 2. Проверка media:group/media:content duration (у трансляций может быть 0 или отсутствовать)
+    media_group = entry.find("media:group", ns)
+    if media_group is not None:
+        content = media_group.find("media:content", ns)
+        if content is not None:
+            duration = content.get("duration")
+            if duration == "0" or duration is None:
+                # Трансляции часто имеют duration="0" в RSS
+                return True
+    
+    # 3. Проверка по наличию слова "Прямой эфир" или "Live" в заголовке
+    title = entry.find("atom:title", ns).text
+    if any(kw in title.lower() for kw in ["прямой эфир", "live", "stream", "трансляция"]):
+        return True
+    
+    return False
+
 def find_daily_news_video():
-    """Найти САМОЕ СВЕЖЕЕ видео по ключевым словам"""
+    """Найти САМОЕ СВЕЖЕЕ ОБЫЧНОЕ видео по ключевым словам"""
     rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={YOUTUBE_CHANNEL_ID}"
     print(f"🔍 RSS: {rss_url}")
     try:
@@ -29,12 +55,24 @@ def find_daily_news_video():
         return None
     
     root = ET.fromstring(resp.content)
-    ns = {"atom": "http://www.w3.org/2005/Atom"}
+    ns = {
+        "atom": "http://www.w3.org/2005/Atom",
+        "yt": "http://www.youtube.com/xml/schemas/2015",
+        "media": "http://search.yahoo.com/mrss/"
+    }
     
-    # Собираем ВСЕ видео, которые подходят под паттерны
+    # Собираем все подходящие видео, пропуская трансляции
     matched = []
+    skipped = 0
     for entry in root.findall("atom:entry", ns):
         title = entry.find("atom:title", ns).text
+        
+        # Проверяем на трансляцию ДО проверки паттернов
+        if is_livestream_or_premiere(entry, ns):
+            print(f"   ⏭️ Пропущена трансляция: {title}")
+            skipped += 1
+            continue
+        
         video_url = entry.find("atom:link", ns).attrib["href"]
         video_id = entry.find("atom:id", ns).text.split(":")[-1]
         published = entry.find("atom:published", ns).text
@@ -46,6 +84,7 @@ def find_daily_news_video():
                 })
                 break
     
+    print(f"   Пропущено трансляций: {skipped}")
     print(f"   Найдено совпадений: {len(matched)}")
     
     if not matched:
@@ -54,7 +93,7 @@ def find_daily_news_video():
             print(f"      - {entry.find('atom:title', ns).text}")
         return None
     
-    # Берём самое свежее (первое в RSS = самое новое)
+    # Берём самое свежее (первое в выдаче)
     best = matched[0]
     print(f"   ✅ Самое свежее: {best['title']} (дата: {best['date']})")
     return {"title": best['title'], "id": best['id'], "url": best['url']}
